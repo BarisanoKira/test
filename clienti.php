@@ -124,7 +124,7 @@ mysqli_free_result($res_first);
 // 6) Lettura anagraficau e costruzione dell'array dei clienti
 // Aggiorniamo la query per includere anche il campo log
 $sql_ana = "
-   SELECT ints, comune, pr, tell, cell, email, agente, log
+   SELECT ints, via, n, comune, pr, tell, cell, email, agente, log
    FROM anagraficau
 ";
 $res_ana = mysqli_query($link, $sql_ana);
@@ -181,6 +181,8 @@ while($row = mysqli_fetch_assoc($res_ana)){
     
     $clienti[] = [
         'ints'      => $ints,
+        'via'       => $row['via'] ?? '',
+        'n'         => $row['n'] ?? '',
         'stato'     => $stato,
         'agente'    => $row['agente'] ?? '',
         'comune'    => $row['comune'] ?? '',
@@ -225,6 +227,8 @@ usort($clienti, function($a, $b) use($anno_selezionato) {
 
 
   <link rel="stylesheet" href="styleReport.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-sA+so+uRhz7O3KPmG2TF+ExQDG1ty9aiHuxD6F3rD1o=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-o9N1jOaJ/EhHRMY0kli3HbhgK4YnosFXcR8mIkSdX0w=" crossorigin=""></script>
 
   <style>
 
@@ -249,6 +253,7 @@ usort($clienti, function($a, $b) use($anno_selezionato) {
     .arrow-up { color:#28a745; margin-left:4px; }
     .arrow-down { color:#dc3545; margin-left:4px; }
     .card { overflow:hidden; }
+    .map-container { height:400px; width:100%; }
   </style>
 </head>
 <body>
@@ -505,26 +510,35 @@ usort($clienti, function($a, $b) use($anno_selezionato) {
   <!-- Main Content -->
   <div class="main-content">
     <div class="container-fluid">
-      <h3 class="mb-4">Clienti</h3>
+      <div class="d-flex flex-column flex-md-row justify-content-between align-items-start mb-4">
+        <h3 class="mb-3 mb-md-0">Clienti</h3>
+        <div class="card shadow-sm ms-md-3 flex-fill" style="max-width:600px;">
+          <div id="clientiMap" class="map-container"></div>
+        </div>
+      </div>
       
       <!-- Card: Nuovi Clienti (conta solo chi ha acquistato e risulta nuovo) -->
       <div class="row mb-4">
-        <div class="col-md-4">
-          <div class="card shadow-sm">
-            <div class="card-body text-center">
-              <h5>Nuovi Clienti</h5>
-              <div style="font-size:1.8em;font-weight:bold;"><?php echo $numNuoviClienti; ?></div>
-              <p class="text-muted mb-0">(acquisto per la prima volta dal <?php echo "{$anno_selezionato}-01-01"; ?>)</p>
+        <div class="col-md-8">
+          <div class="row">
+            <div class="col-md-6 mb-3 mb-md-0">
+              <div class="card shadow-sm h-100">
+                <div class="card-body text-center">
+                  <h5>Nuovi Clienti</h5>
+                  <div style="font-size:1.8em;font-weight:bold;"><?php echo $numNuoviClienti; ?></div>
+                  <p class="text-muted mb-0">(acquisto per la prima volta dal <?php echo "{$anno_selezionato}-01-01"; ?>)</p>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        <!-- Card: Clienti Attivi -->
-        <div class="col-md-4">
-          <div class="card shadow-sm">
-            <div class="card-body text-center">
-              <h5>Clienti Attivi</h5>
-              <div style="font-size:1.8em;font-weight:bold;"><?php echo $numAttiviRange; ?></div>
-              <p class="text-muted mb-0">(acquisto nell'anno <?php echo $anno_selezionato; ?>)</p>
+            <!-- Card: Clienti Attivi -->
+            <div class="col-md-6">
+              <div class="card shadow-sm h-100">
+                <div class="card-body text-center">
+                  <h5>Clienti Attivi</h5>
+                  <div style="font-size:1.8em;font-weight:bold;"><?php echo $numAttiviRange; ?></div>
+                  <p class="text-muted mb-0">(acquisto nell'anno <?php echo $anno_selezionato; ?>)</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -700,6 +714,7 @@ usort($clienti, function($a, $b) use($anno_selezionato) {
 </div>
 
 <script>
+const clientiMapData = <?php echo json_encode($clienti); ?>;
 let currentPage = 1;
 const rowsPerPage = 50;
 let initialPageLoad = true; // Scroll solo al cambio pagina
@@ -879,7 +894,37 @@ function sortByColumn(colIndex, direction){
 
 document.addEventListener('DOMContentLoaded', () => {
   updateTableDisplay();
+  initClientiMap();
 });
+
+function initClientiMap(){
+  if(typeof L === 'undefined'){ return; }
+  const map = L.map('clientiMap').setView([41.8719, 12.5674], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  fetch('https://raw.githubusercontent.com/openpolis/geojson-italy/master/limits_IT_regions.geojson')
+    .then(r => r.json())
+    .then(data => {
+      L.geoJSON(data, { style: { weight:1, color:'#555', fillOpacity:0.1 } }).addTo(map);
+    });
+
+  clientiMapData.forEach(c => {
+    const addr = `${c.via} ${c.n}, ${c.comune}, ${c.pr}, Italia`;
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addr)}`)
+      .then(r => r.json())
+      .then(d => {
+        if(d && d[0]){
+          const lat = parseFloat(d[0].lat);
+          const lon = parseFloat(d[0].lon);
+          const popup = `<strong>${c.ints}</strong><br>${c.via} ${c.n}, ${c.comune} (${c.pr})<br>Cell: ${c.cell}<br>Email: ${c.email}`;
+          L.marker([lat, lon]).addTo(map).bindPopup(popup);
+        }
+      });
+  });
+}
 
 
 
