@@ -243,6 +243,20 @@ foreach ($clienti as $c) {
   <!-- Tuo CSS -->
   <link rel="stylesheet" href="styleReport.css">
 
+  <style>
+    /* dimensioni mappa responsive */
+    #map {
+      width: 100%;
+      height: 50vh;
+      min-height: 300px;
+    }
+    @media (max-width: 768px) {
+      #map {
+        height: 40vh;
+      }
+    }
+  </style>
+
   <!-- Leaflet con SRI -->
   <link
     rel="stylesheet"
@@ -918,11 +932,13 @@ function sortByColumn(colIndex, direction){
   filterTable();
 }
 
+
 document.addEventListener('DOMContentLoaded', () => {
   updateTableDisplay();
+  const sel = document.getElementById('mapFilter');
+  updateMarkers(sel.value);
+  sel.addEventListener('change', () => updateMarkers(sel.value));
 });
-
-
 
 
 // ====================== JAVASCRIPT LEGATO ALLA SIDEBAR ====================== 
@@ -990,52 +1006,44 @@ function printPage() {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map);
-  var geocoder = L.Control.Geocoder.nominatim();
+
   var activeMarkers = [];
-  function updateMarkers(filter) {
+
+  async function geocodeAddress(addr) {
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(addr);
+    try {
+      const r = await fetch(url, { headers: { 'Accept-Language': 'it' } });
+      const data = await r.json();
+      if (data && data[0]) {
+        return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+      }
+    } catch(e) {}
+    return null;
+  }
+
+  async function updateMarkers(filter) {
     activeMarkers.forEach(m => map.removeLayer(m));
     activeMarkers = [];
-    clients.forEach(c => {
-      if (filter === 'all' || c[filter]) {
-        geocoder.geocode(c.address, function(results) {
-          if (results && results.length) {
-            var loc = results[0].center;
-            var m = L.marker(loc).addTo(map);
-            m.bindPopup(
-              '<strong>' + c.ints + '</strong><br>' +
-              c.address + '<br>' +
-              (c.cell  ? '📱 ' + c.cell  + '<br>' : '') +
-              (c.email ? '✉️ ' + c.email    : '')
-            );
-            activeMarkers.push(m);
-          }
-        });
+    for (const c of clients) {
+      if (filter !== 'all' && !c[filter]) continue;
+      const coords = await geocodeAddress(c.address);
+      if (coords) {
+        var m = L.marker(coords).addTo(map);
+        m.bindPopup(
+          '<strong>' + c.ints + '</strong><br>' +
+          c.address + '<br>' +
+          (c.cell  ? '📱 ' + c.cell  + '<br>' : '') +
+          (c.email ? '✉️ ' + c.email    : '')
+        );
+        activeMarkers.push(m);
       }
-    });
+    }
   }
 
   // 2) Filtro tabella, paginazione, sort, ecc.
+  //  (funzioni gia' definite in precedenza)
 
-  let initialPageLoad = true;
-  function filterTable() { currentPage = 1; updateTableDisplay(); }
-  function updateTableDisplay() { /*... tuo codice esistente ...*/ }
-  function buildPagination(totalPages) { /*...*/ }
-  function sortByColumn(colIndex,direction){ /*...*/ }
 
-  // 3) On DOM ready
-  document.addEventListener('DOMContentLoaded', function() {
-    // innesca filtro tabella
-    updateTableDisplay();
-    // innesca mappa
-    var sel = document.getElementById('mapFilter');
-    updateMarkers(sel.value);
-    sel.addEventListener('change', function(){ updateMarkers(this.value); });
-  });
-
-  // 4) Selezione agente e printPage
-  function selectAgente(nome,redirect){ /*...*/ }
-  function filterAgenti(){ /*...*/ }
-  function printPage(){ /*...*/ }
 </script>
 
 
