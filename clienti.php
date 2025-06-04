@@ -206,24 +206,39 @@ usort($clienti, function($a, $b) use($anno_selezionato) {
     return $vb <=> $va;
 });
 
+function geocode_address($addr) {
+    $ctx = stream_context_create([
+        'http' => ['header' => "User-Agent: clienti-map/1.0\r\n"]
+    ]);
+    $url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' . urlencode($addr);
+    $json = @file_get_contents($url, false, $ctx);
+    if ($json === false) return null;
+    $data = json_decode($json, true);
+    if (!empty($data[0]['lat']) && !empty($data[0]['lon'])) {
+        return [floatval($data[0]['lat']), floatval($data[0]['lon'])];
+    }
+    return null;
+}
+
 $mapClients = [];
 foreach ($clienti as $c) {
-    // filtro acquisti
     $has1 = ($c['acquisiti'][$anno_selezionato] ?? 0) > 0;
     $has2 = $has1 || (($c['acquisiti'][$anno_selezionato-1] ?? 0) > 0);
     $has3 = $has2 || (($c['acquisiti'][$anno_selezionato-2] ?? 0) > 0);
 
-    // compongo l'indirizzo completo
     $address = trim("{$c['via']} {$c['n']}, {$c['comune']}, {$c['pr']}, Italy");
+    $coords = geocode_address($address);
 
     $mapClients[] = [
         'ints'    => $c['ints'],
         'address' => $address,
+        'lat'     => $coords[0] ?? null,
+        'lon'     => $coords[1] ?? null,
         'cell'    => $c['cell'],
         'email'   => $c['email'],
         'has1'    => $has1,
         'has2'    => $has2,
-        'has3'    => $has3
+        'has3'    => $has3,
     ];
 }
 
@@ -242,6 +257,20 @@ foreach ($clienti as $c) {
 
   <!-- Tuo CSS -->
   <link rel="stylesheet" href="styleReport.css">
+
+  <style>
+    /* dimensioni mappa responsive */
+    #map {
+      width: 100%;
+      height: 50vh;
+      min-height: 300px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    @media (max-width: 768px) {
+      #map { height: 40vh; }
+    }
+  </style>
 
   <!-- Leaflet con SRI -->
   <link
@@ -544,7 +573,7 @@ foreach ($clienti as $c) {
               <option value="has3">Ultimi 3 anni</option>
             </select>
           </div>
-          <div id="map" style="width:100%; height:400px; border:1px solid #ddd; border-radius:8px;"></div>
+          <div id="map"></div>
         </div>
       </div>
       
@@ -918,9 +947,6 @@ function sortByColumn(colIndex, direction){
   filterTable();
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  updateTableDisplay();
-});
 
 
 
@@ -990,26 +1016,28 @@ function printPage() {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map);
-  var geocoder = L.Control.Geocoder.nominatim();
+
   var activeMarkers = [];
-  function updateMarkers(filter) {
+
+  function clearMarkers() {
     activeMarkers.forEach(m => map.removeLayer(m));
     activeMarkers = [];
+  }
+
+  function updateMarkers(filter) {
+    clearMarkers();
     clients.forEach(c => {
-      if (filter === 'all' || c[filter]) {
-        geocoder.geocode(c.address, function(results) {
-          if (results && results.length) {
-            var loc = results[0].center;
-            var m = L.marker(loc).addTo(map);
-            m.bindPopup(
-              '<strong>' + c.ints + '</strong><br>' +
-              c.address + '<br>' +
-              (c.cell  ? '📱 ' + c.cell  + '<br>' : '') +
-              (c.email ? '✉️ ' + c.email    : '')
-            );
-            activeMarkers.push(m);
-          }
-        });
+      if (filter !== 'all' && !c[filter]) return;
+      if (c.lat && c.lon) {
+        var m = L.marker([c.lat, c.lon]).addTo(map);
+        m.bindPopup(
+          '<strong>' + c.ints + '</strong><br>' +
+          c.address + '<br>' +
+          (c.cell  ? '📱 ' + c.cell  + '<br>' : '') +
+          (c.email ? '✉️ ' + c.email    : '')
+        );
+        m.on('mouseover', function(){ this.openPopup(); });
+        activeMarkers.push(m);
       }
     });
   }
