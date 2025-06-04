@@ -19,6 +19,10 @@ if (!isset($utente_autorizzato) || !$utente_autorizzato) {
 
 date_default_timezone_set('Europe/Rome');
 
+// ensure lat/lon columns exist in anagraficau
+$link->query("ALTER TABLE anagraficau ADD COLUMN IF NOT EXISTS lat DECIMAL(10,7)");
+$link->query("ALTER TABLE anagraficau ADD COLUMN IF NOT EXISTS lon DECIMAL(10,7)");
+
 // 1) Parametri: anno selezionato
 $anno_corrente    = date('Y');
 $anno_selezionato = isset($_GET['anno']) ? (int)$_GET['anno'] : $anno_corrente;
@@ -133,6 +137,22 @@ $provinceSet = [];
 while($row = mysqli_fetch_assoc($res_ana)) {
     $ints = $row['ints'];
 
+    // calcola coordinate se mancanti
+    $lat = $row['lat'] ?? null;
+    $lon = $row['lon'] ?? null;
+    if (empty($lat) || empty($lon)) {
+        $addr = trim("{$row['via']} {$row['n']}, {$row['comune']}, {$row['pr']}, Italy");
+        $coords = geocode_address($addr);
+        if ($coords) {
+            $lat = $coords[0];
+            $lon = $coords[1];
+            $upd = $link->prepare('UPDATE anagraficau SET lat = ?, lon = ? WHERE ints = ?');
+            $upd->bind_param('dds', $lat, $lon, $ints);
+            $upd->execute();
+            $upd->close();
+        }
+    }
+
     // 1) Stato (basato sull'anno selezionato)
     $num_conf = $statusMap[$ints]['num_conf'] ?? 0;
     $num_prev = $statusMap[$ints]['num_prev'] ?? 0;
@@ -182,6 +202,8 @@ while($row = mysqli_fetch_assoc($res_ana)) {
         'tell'       => $row['tell']     ?? '',
         'cell'       => $row['cell']     ?? '',
         'email'      => $row['email']    ?? '',
+        'lat'        => $lat,
+        'lon'        => $lon,
         'acquisiti'  => $anniData,
         'isNuovo'    => $isNuovo,
         'isInserted' => $isInserted
@@ -227,13 +249,12 @@ foreach ($clienti as $c) {
     $has3 = $has2 || (($c['acquisiti'][$anno_selezionato-2] ?? 0) > 0);
 
     $address = trim("{$c['via']} {$c['n']}, {$c['comune']}, {$c['pr']}, Italy");
-    $coords = geocode_address($address);
 
     $mapClients[] = [
         'ints'    => $c['ints'],
         'address' => $address,
-        'lat'     => $coords[0] ?? null,
-        'lon'     => $coords[1] ?? null,
+        'lat'     => $c['lat'],
+        'lon'     => $c['lon'],
         'cell'    => $c['cell'],
         'email'   => $c['email'],
         'has1'    => $has1,
